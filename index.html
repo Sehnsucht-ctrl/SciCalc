@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Scientific Calculator</title>
+<meta name="theme-color" content="#101216">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<style>
+:root{--bg:#101216;--panel:#171a20;--num:#252a36;--fn:#1b1f29;--op:#2d3857;--acc:#9ad1ff;--onacc:#0b1a2b;--tx:#e8ebf2;--mu:#8a93a6;--ring:#9ad1ff}
+@media (prefers-color-scheme:light){:root:not([data-theme=dark]){--bg:#e9ecf2;--panel:#f7f8fb;--num:#ffffff;--fn:#dde2ec;--op:#cfd9f2;--acc:#1f6fd8;--onacc:#fff;--tx:#161a22;--mu:#667085;--ring:#1f6fd8}}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--tx);font-family:ui-rounded,"SF Pro Rounded","Segoe UI Variable",system-ui,sans-serif;overscroll-behavior:none}
+body{display:flex;justify-content:center;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+.app{width:100%;max-width:440px;height:100%;display:flex;flex-direction:column;padding:10px 12px 14px;gap:10px}
+.screen{flex:1 1 auto;min-height:150px;background:var(--panel);border-radius:28px;padding:16px 20px;display:flex;flex-direction:column;justify-content:flex-end;align-items:flex-end;position:relative;overflow:hidden}
+.mode{position:absolute;left:20px;top:16px;font-size:13px;color:var(--mu);font-weight:600}
+#hbtn{position:absolute;right:14px;top:10px;background:none;border:0;color:var(--mu);font-size:13px;font-weight:600;padding:8px;border-radius:12px;cursor:pointer}
+#expr{font-size:22px;color:var(--mu);max-width:100%;overflow-x:auto;white-space:nowrap;direction:rtl;scrollbar-width:none;min-height:30px;font-variant-numeric:tabular-nums}
+#expr::-webkit-scrollbar{display:none}
+#res{font-size:clamp(44px,13vw,64px);font-weight:300;letter-spacing:-.02em;line-height:1.1;max-width:100%;white-space:nowrap;overflow-x:auto;scrollbar-width:none;font-variant-numeric:tabular-nums}
+#res.err{color:#ff8a8a;font-size:36px}
+.keys{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;flex:0 0 auto}
+button.k{font:inherit;font-size:clamp(17px,5vw,22px);height:clamp(48px,7.4vh,62px);border:0;border-radius:18px;background:var(--num);color:var(--tx);cursor:pointer;transition:transform .08s,filter .08s;touch-action:manipulation}
+button.k:active{transform:scale(.94);filter:brightness(1.25)}
+button.k:focus-visible,#hbtn:focus-visible{outline:2px solid var(--ring);outline-offset:2px}
+.k.f{background:var(--fn);font-size:clamp(14px,4.2vw,18px);color:var(--tx)}
+.k.o{background:var(--op)}
+.k.c{background:var(--fn);color:var(--acc);font-weight:600}
+.k.eq{background:var(--acc);color:var(--onacc);font-weight:700}
+.k.on{background:var(--acc);color:var(--onacc)}
+#hist{position:fixed;inset:0;background:rgba(0,0,0,.5);display:none;align-items:flex-end;justify-content:center}
+#hist.open{display:flex}
+#hist .sheet{width:100%;max-width:440px;max-height:70%;overflow:auto;background:var(--panel);border-radius:28px 28px 0 0;padding:16px 18px calc(18px + env(safe-area-inset-bottom))}
+.hrow{padding:12px 4px;border-bottom:1px solid var(--fn);cursor:pointer;display:flex;flex-direction:column;align-items:flex-end}
+.hrow small{color:var(--mu);font-size:15px}.hrow b{font-weight:400;font-size:26px}
+.hhead{display:flex;justify-content:space-between;align-items:center;font-weight:600}
+.hhead button{background:none;border:0;color:var(--acc);font:inherit;padding:8px;cursor:pointer}
+.empty{color:var(--mu);padding:24px 0;text-align:center}
+@media (prefers-reduced-motion:reduce){button.k{transition:none}}
+</style>
+</head>
+<body>
+<main class="app">
+  <section class="screen" aria-live="polite">
+    <span class="mode" id="mode">DEG</span>
+    <button id="hbtn" type="button">History</button>
+    <div id="expr"></div>
+    <div id="res">0</div>
+  </section>
+  <section class="keys" id="keys"></section>
+</main>
+<div id="hist"><div class="sheet"><div class="hhead"><span>History</span><span><button id="hclear" type="button">Clear</button><button id="hclose" type="button">Close</button></span></div><div id="hlist"></div></div></div>
+<script>
+const $=s=>document.querySelector(s);
+let expr='',fresh=false,deg=true,inv=false,ans=0,hist=[];
+try{hist=JSON.parse(localStorage.getItem('sc-hist')||'[]')}catch(e){}
+const saveH=()=>{try{localStorage.setItem('sc-hist',JSON.stringify(hist.slice(0,30)))}catch(e){}};
+
+/* ---------- parser (no eval) ---------- */
+const FN='asin|acos|atan|sin|cos|tan|ln|log|√|abs';
+const RE=new RegExp('(\\d+\\.?\\d*|\\.\\d+)|('+FN+')|(π|e|Ans)|([+\\-−×÷*/^!%()])','y');
+function tokenize(s){
+  const t=[];let i=0;
+  while(i<s.length){
+    RE.lastIndex=i;const m=RE.exec(s);if(!m)throw 0;i=RE.lastIndex;
+    if(m[1]!==undefined)t.push({n:parseFloat(m[1])});
+    else if(m[2])t.push({f:m[2]});
+    else if(m[3])t.push({n:m[3]==='π'?Math.PI:m[3]==='e'?Math.E:ans});
+    else t.push({o:({'−':'-','×':'*','÷':'/'})[m[4]]||m[4]});
+  }
+  return t;
+}
+const R=x=>deg?x*Math.PI/180:x,Q=x=>deg?x*180/Math.PI:x,snap=v=>Math.abs(v)<1e-14?0:v;
+const FNS={
+  sin:x=>snap(Math.sin(R(x))),cos:x=>snap(Math.cos(R(x))),
+  tan:x=>{if(deg&&Math.abs(x%180)===90)throw 0;return snap(Math.tan(R(x)))},
+  asin:x=>Q(Math.asin(x)),acos:x=>Q(Math.acos(x)),atan:x=>Q(Math.atan(x)),
+  ln:Math.log,log:Math.log10,'√':Math.sqrt,abs:Math.abs
+};
+function fact(n){if(n<0||n%1||n>170)throw 0;let r=1;for(let i=2;i<=n;i++)r*=i;return r}
+function evaluate(s){
+  const T=tokenize(s);let p=0,d=0;
+  for(const k of T){if(k.o==='(')d++;if(k.o===')')d--}
+  while(d-->0)T.push({o:')'});
+  const is=c=>T[p]&&T[p].o===c;
+  const expr=()=>{let v=term();while(is('+')||is('-')){const o=T[p++].o,r=term();v=o==='+'?v+r:v-r}return v};
+  const term=()=>{let v=unary();for(;;){
+    if(is('*')){p++;v*=unary()}else if(is('/')){p++;v/=unary()}
+    else if(T[p]&&(T[p].n!==undefined||T[p].f||is('(')))v*=unary();else break}return v};
+  const unary=()=>{if(is('-')){p++;return -unary()}if(is('+')){p++;return unary()}return power()};
+  const power=()=>{const b=post();if(is('^')){p++;return Math.pow(b,unary())}return b};
+  const post=()=>{let v=prim();while(is('!')||is('%')){const o=T[p++].o;v=o==='!'?fact(v):v/100}return v};
+  const prim=()=>{
+    const k=T[p++];if(!k)throw 0;
+    if(k.n!==undefined)return k.n;
+    if(k.f){if(!is('('))throw 0;p++;const a=expr();if(!is(')'))throw 0;p++;return FNS[k.f](a)}
+    if(k.o==='('){const v=expr();if(!is(')'))throw 0;p++;return v}
+    throw 0};
+  const v=expr();if(p<T.length||!isFinite(v))throw 0;return v;
+}
+function fmt(v){
+  if(Object.is(v,-0))v=0;const a=Math.abs(v);
+  if(a>=1e12||(a>0&&a<1e-6))return Number(v.toPrecision(10)).toExponential().replace('e+','e');
+  return String(Number(v.toPrecision(12)));
+}
+
+/* ---------- keypad ---------- */
+// [label, 2nd label, insert, 2nd insert, class]
+const K=[
+ ['2nd','2nd','@inv','@inv','f'],['sin','sin⁻¹','sin(','asin(','f'],['cos','cos⁻¹','cos(','acos(','f'],['tan','tan⁻¹','tan(','atan(','f'],['DEG','DEG','@deg','@deg','f'],
+ ['ln','eˣ','ln(','e^(','f'],['log','10ˣ','log(','10^(','f'],['√','x²','√(','^2','f'],['xʸ','x³','^','^3','f'],['n!','x⁻¹','!','^(−1)','f'],
+ ['π','π','π','π','f'],['e','e','e','e','f'],['(','(','(','(','f'],[')',')',')',')','f'],['Ans','Ans','Ans','Ans','f'],
+ ['7','7','7','7',''],['8','8','8','8',''],['9','9','9','9',''],['÷','÷','÷','÷','o'],['AC','AC','@ac','@ac','c'],
+ ['4','4','4','4',''],['5','5','5','5',''],['6','6','6','6',''],['×','×','×','×','o'],['⌫','⌫','@bs','@bs','c'],
+ ['1','1','1','1',''],['2','2','2','2',''],['3','3','3','3',''],['−','−','−','−','o'],['%','%','%','%','o'],
+ ['0','0','0','0',''],['.','.','.','.',''],['±','±','@neg','@neg',''],['+','+','+','+','o'],['=','=','@eq','@eq','eq']
+];
+const keys=$('#keys');
+K.forEach((k,i)=>{const b=document.createElement('button');b.type='button';b.className='k '+k[4];b.textContent=k[0];b.dataset.i=i;b.setAttribute('aria-label',k[0]);keys.appendChild(b)});
+function relabel(){
+  [...keys.children].forEach((b,i)=>{const k=K[i];
+    if(k[2]==='@inv')b.classList.toggle('on',inv);
+    else if(k[2]==='@deg')b.textContent=deg?'DEG':'RAD';
+    else b.textContent=inv?k[1]:k[0]});
+  $('#mode').textContent=deg?'DEG':'RAD';
+}
+const BS=new RegExp('(?:('+FN+')\\(|Ans|.)$');
+function act(a){
+  if(a==='@inv'){inv=!inv;relabel();return}
+  if(a==='@deg'){deg=!deg;relabel();update();return}
+  if(a==='@ac'){expr='';fresh=false;return update()}
+  if(a==='@bs'){expr=fresh?'':expr.replace(BS,'');fresh=false;return update()}
+  if(a==='@eq')return equals();
+  if(fresh){expr=/^[+−×÷^%!]/.test(a)?'Ans':'';fresh=false}
+  if(a==='@neg'){expr=/^−\(.*\)$/.test(expr)?expr.slice(2,-1):expr?'−('+expr+')':'−'}
+  else expr+=a;
+  update();
+}
+function press(i){
+  const k=K[i];navigator.vibrate&&navigator.vibrate(6);
+  act(inv&&k[3]!==k[2]?k[3]:k[2]);
+  if(inv&&k[3]!==k[2]&&!k[2].startsWith('@')){inv=false;relabel()}
+}
+keys.addEventListener('click',e=>{const b=e.target.closest('button');if(b)press(+b.dataset.i)});
+
+function update(err){
+  $('#expr').textContent=expr;
+  const r=$('#res');r.classList.remove('err');
+  if(err){r.textContent='Error';r.classList.add('err');return}
+  if(fresh)return;
+  try{r.textContent=expr?fmt(evaluate(expr)):'0'}catch(e){if(!expr)r.textContent='0'}
+}
+function equals(){
+  if(!expr||fresh)return;
+  try{const v=evaluate(expr);const s=fmt(v);
+    hist.unshift({e:expr,r:s});saveH();ans=v;
+    $('#expr').textContent=expr+' =';$('#res').textContent=s;$('#res').classList.remove('err');fresh=true;
+  }catch(e){update(true)}
+}
+
+/* ---------- keyboard ---------- */
+addEventListener('keydown',e=>{
+  if(e.ctrlKey||e.metaKey||e.altKey)return;
+  const m={'*':'×','/':'÷','-':'−','Enter':'@eq','=':'@eq','Backspace':'@bs','Escape':'@ac','Delete':'@ac'};
+  let a=m[e.key]||(/^[0-9.+^()!%]$/.test(e.key)?e.key:null);
+  if(!a&&e.key==='p')a='π';if(!a&&e.key==='e')a='e';
+  if(a){e.preventDefault();act(a)}
+});
+
+/* ---------- history ---------- */
+function drawH(){
+  const l=$('#hlist');l.innerHTML='';
+  if(!hist.length){l.innerHTML='<div class="empty">Calculations you finish appear here.</div>';return}
+  hist.slice(0,30).forEach(h=>{const d=document.createElement('div');d.className='hrow';
+    d.innerHTML='<small></small><b></b>';d.children[0].textContent=h.e;d.children[1].textContent=h.r;
+    d.onclick=()=>{expr=h.e;fresh=false;$('#hist').classList.remove('open');update()};l.appendChild(d)});
+}
+$('#hbtn').onclick=()=>{drawH();$('#hist').classList.add('open')};
+$('#hclose').onclick=()=>$('#hist').classList.remove('open');
+$('#hclear').onclick=()=>{hist=[];saveH();drawH()};
+$('#hist').addEventListener('click',e=>{if(e.target.id==='hist')e.target.classList.remove('open')});
+
+relabel();update();
+if('serviceWorker' in navigator&&location.protocol.startsWith('http'))navigator.serviceWorker.register('sw.js').catch(()=>{});
+</script>
+</body>
+</html>
